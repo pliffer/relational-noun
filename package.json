@@ -1,0 +1,23 @@
+{
+  "name": "relational-noun",
+  "version": "1.0.0",
+  "description": "",
+  "main": "relational-noun.js",
+  "directories": {
+    "doc": "doc"
+  },
+  "scripts": {
+    "test": "npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "github.com/pliffer/relational-noun.git"
+  },
+  "author": "Pliffer",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "dependencies": {
+    "fs-extra": "^11.1.0",
+    "mysql": "^2.18.1",
+    "pg": "^8.9.0"
+  }
+}
