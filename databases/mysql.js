@@ -315,52 +315,170 @@ class MySql extends GenericDatabase{
         if(!config.user)     throw new Error('MySql: User not defined');
         if(!config.database) throw new Error('MySql: Database not defined');
 
+        if(!config.connectionLimit) config.connectionLimit = 25;
+
         this.pool = mysql.createPool({
-            connectionLimit : config.connectionLimit || 10,
-            host: config.host || 'localhost',
-            port: config.port || 3306,
-            user: config.user,
+            connectionLimit :  config.connectionLimit,
+            host:     config.host || 'localhost',
+            port:     config.port || 3306,
+            user:     config.user,
             password: config.password || '',
             database: config.database,
-            charset: config.charset || 'utf8mb4'
+            charset:  config.charset || 'utf8mb4'
         });
 
         this.client = mysql.createConnection({
-            host: config.host || 'localhost',
-            port: config.port || 3306,
-            user: config.user,
+            host:     config.host || 'localhost',
+            port:     config.port || 3306,
+            user:     config.user,
             password: config.password || '',
             database: config.database,
-            charset: config.charset || 'utf8mb4'
+            charset:  config.charset || 'utf8mb4'
         });
 
-        this.client.connect((err) => {
+        let mode = 'client';
 
-            if(err){
+        mode = 'pool';
 
-                let stringError = err.toString()
+        if(config.mode){
 
-                if(stringError.includes('ECONNREFUSED')){
-                    console.log(MySql.ERRORS.ECONNREFUSED);
-                    event.emit('error', MySql.ERRORS.ECONNREFUSED);
-                    return MySql.log(stringError);
+            mode = config.mode;
+
+        }
+
+        console.log('O mysql está usando o modo', mode, 'com no máximo', config.connectionLimit, 'conexões simultâneas');
+
+        let connections = 0;
+        let enqueues    = 0;
+
+        this.pool.on('enqueue', function () {
+
+            console.log('Aguardando conexão disponível no pool'.magenta);
+            enqueues++;
+
+        });
+
+        this.pool.on('release', function () {
+
+            // console.log('Conexão liberada do pool');
+            connections--;
+
+        });
+
+        this.pool.on('acquire', function () {
+
+            // console.log('Conexão adquirida do pool');
+            connections++;
+            // enqueues--;
+
+        });
+
+        this.pool.on('connection', function (connection) {
+
+            // console.log('Nova conexão criada no pool');
+
+        });
+
+        if(mode == 'pool'){
+
+            setInterval(() => {
+
+                console.log('@mysql Conexões: '.green, this.pool._allConnections.length, '(' + connections + ')', 'de', config.connectionLimit, '(iddle: ' + this.pool._freeConnections.length + ', enqueues: ' + enqueues + ')');
+    
+            }, 5000);
+
+        }
+
+        this.defaultConnection = this[mode];
+
+        this.stressTest = async () => {
+
+            console.log("\n");
+            // console.log("\n");
+            console.log('@mysql Começando stress test'.red);
+            // console.log("\n");
+            // console.log("\n");
+
+            const tables = await this.fetch("SHOW TABLES");
+
+            // while(true) {
+
+                // console.log('TRYINGGG');
+
+                const table = tables[Math.floor(Math.random() * tables.length)]['Tables_in_' + config.database];
+
+                const sql = `SELECT * FROM ${table}`;
+
+                await this.fetch(sql).then(row => {
+
+                    console.log('Rows', row.length);
+
+                });
+
+                console.log('Executado', sql);
+
+            // }
+            console.log('@mysql Conexões: '.green, this.pool._allConnections.length, '(' + connections + ')', 'de', config.connectionLimit, '(iddle: ' + this.pool._freeConnections.length + ', enqueues: ' + enqueues + ')');
+          
+        }
+
+        if(mode == 'client'){
+
+            this.defaultConnection.connect((err) => {
+
+                if(err){
+    
+                    let stringError = err.toString()
+    
+                    if(stringError.includes('ECONNREFUSED')){
+                        console.log(MySql.ERRORS.ECONNREFUSED);
+                        event.emit('error', MySql.ERRORS.ECONNREFUSED);
+                        return MySql.log(stringError);
+                    }
+    
+                    // If no error is found, throw the error
+                    throw err;
+    
                 }
+    
+                this.connected = true;
+    
+                setInterval(() => {
+    
+                    this.defaultConnection.query("SELECT 1")
+                    
+                }, 10000);
+    
+                MySql.log(`Connected at ${Date.now()}`);
+    
+                event.emit('connect');
+    
+            });
+    
+            this.defaultConnection.on('error', (err) => {
+    
+                if(err.code === 'PROTOCOL_CONNECTION_LOST'){
+    
+                    MySql.log('Database connection was closed.');
+    
+                    this.connected = false;
+    
+                    event.emit('disconnect');
+    
+                } else{
+    
+                    throw err;
+    
+                }
+    
+            });
 
-                // If no error is found, throw the error
-                throw err;
+        } else{
 
-            }
+            this.connected = true;            
+            
+        }
 
-            this.connected = true;
-
-            setInterval(() =>this.client.query("SELECT 1"), 10000);
-
-            MySql.log(`Connected at ${Date.now()}`);
-
-            event.emit('connect');
-
-        });
-        
         this.on = event.on.bind(event);
 
         return this;
@@ -653,86 +771,6 @@ class MySql extends GenericDatabase{
 
     }
 
-    // --------------------------------------------------
-
-    
-        // // Retorna apenas a primeira ROW
-        // poolClient.readQuery = (sql, prepared) => {
-
-        //     if(process.env.VERBOSE == "true") console.log(sql.magenta);
-
-        //     let t0 = new Date().getTime();
-        //     let slowQuery = false;
-
-        //     let slowTimeout = setTimeout(function(){
-
-        //         slowQuery = true;
-
-        //     }, Database.slowDelay);
-
-        //     return new Promise(function(resolve, reject){
-
-        //         // Mostra um aviso, caso a query não tenha limit 1 no final
-        //         if(sql.substr(-7).toLowerCase()!='limit 1'){
-        //             console.warn("Database.js: read Query sem limit 1");
-        //         }
-
-        //         // Executa a query
-        //         pool.query(sql, prepared, (err, answer) => {
-
-        //             if(err){
-
-        //                 Logs.save('database-read-query', {
-        //                     err: err,
-        //                     sql: sql,
-        //                     prepared: prepared
-        //                 }, 20);
-
-        //                 reject(err);
-
-        //             } else(resolve(answer[0]));
-
-        //             if(process.env.VERBOSE == "true") console.log(sql.magenta, prepared, new Date().getTime() - t0, `ms (uq:${client.threadId})`.blue);
-
-        //             clearTimeout(slowTimeout);
-
-        //             if(slowQuery){
-
-        //                 Logs.save('slow query', {
-        //                     sql: sql,
-        //                     prepared: prepared,
-        //                     delay: new Date().getTime() - t0
-        //                 });
-
-        //             }
-
-        //         });
-
-        //     });
-
-                    // });
-
-    // --------------------------------------------------
-    // if(err.code == 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR'){
-
-    //     Database.restartCon('fetch', sql, prepared, callback);
-
-    // }
-
-    // restartCon: function(type, sql, prepared, callback){
-
-    //     console.log('Regen connection');
-
-    //     global.db.end();
-
-    //     let newDb = Database.getMysql();
-
-    //     global.db = newDb;
-
-    //     global.db[type](sql, prepared, callback);
-
-    // },
-
     get con (){
 
         return new Promise((resolve, reject) => {
@@ -749,13 +787,45 @@ class MySql extends GenericDatabase{
 
     }
 
-    async fetch(sql, prepared = []){
+    get poolConnection(){
+
+        return this.con.then(con => {
+    
+            con.fetch = (sql, prepared = []) => {
+    
+                return this.fetch(sql, prepared, con);
+    
+            }
+    
+            con.read = (sql, prepared = []) => {
+    
+                return this.read(sql, prepared, con);
+    
+            }
+    
+            con.write = (sql, prepared = []) => {
+    
+                return this.write(sql, prepared, con);
+    
+            }
+    
+            return con;
+            
+        });
+
+    }
+
+    async fetch(sql, prepared = [], con = null){
+
+        if(!con) con = this.defaultConnection;
+
+        if(process.env.VERBOSE == 'true') console.log("\n" + '@mysql Fetch-> '.red, sql, prepared, "\n");
 
         return new Promise((resolve, reject) => {
 
             if(!this.connected) return reject("@MySql Not connected");
 
-            this.client.query(sql, prepared, (err, answer) => {
+            con.query(sql, prepared, (err, answer) => {
 
                 if(err){
 
@@ -773,13 +843,17 @@ class MySql extends GenericDatabase{
 
     }
 
-    read(sql, prepared = []){
+    read(sql, prepared = [], con = null){
+
+        if(!con) con = this.defaultConnection;
+
+        if(process.env.VERBOSE == 'true') console.log("\n" + '@mysql Fetch-> '.red, sql, prepared, "\n");
 
         return new Promise((resolve, reject) => {
 
             if(!this.connected) return reject("@MySql Not connected");
 
-            this.client.query(sql, prepared, (err, answer) => {
+            con.query(sql, prepared, (err, answer) => {
 
                 if(err){
 
@@ -797,13 +871,17 @@ class MySql extends GenericDatabase{
 
     }
 
-    async write(sql, prepared = []){
+    async write(sql, prepared = [], con = null){
+
+        if(!con) con = this.defaultConnection;
+
+        if(process.env.VERBOSE == 'true') console.log("\n" + '@mysql Write-> '.red, sql, prepared, "\n");
 
         return new Promise((resolve, reject) => {
 
             if(!this.connected) return reject("@MySql Not connected");
 
-            this.client.query(sql, prepared, (err, answer) => {
+            con.query(sql, prepared, (err, answer) => {
 
                 if(err){
 
